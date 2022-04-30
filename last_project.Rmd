@@ -1,0 +1,143 @@
+---
+title: "last project--Practical Machine Learning"
+author: 'Haibin Qian'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Background
+### Based on raw data on accelerometers, my goal is to build models on train data, test performace and predict test data
+
+## Tidymodels for this assignment
+### tidymodels.org
+
+## load required libraries
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(randomForest)
+library(skimr)
+```
+
+## load data sets
+```{r}
+train_dt <- read.csv(url('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'))
+
+test_dt <- read.csv(url('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'))
+
+```
+
+## explory data analysis using skim
+```{r}
+skim(train_dt) %>% 
+  tibble::as_tibble() %>% 
+  dplyr::filter(n_missing != 0) %>% 
+  .[, 2:4]
+```
+
+### As can be seen that there are 67 variables possess so many missing data (19216), which is unlikely to be useful for modeling
+
+## remove these useless variables
+```{r}
+uless <- skim(train_dt) %>% 
+  tibble::as_tibble() %>% 
+  dplyr::filter(n_missing != 0) %>% 
+  .[ ,2]
+
+new_train <- train_dt %>% 
+  select(-as.vector(t(uless))) %>% 
+  select(-c(1:6))
+
+new_test <- test_dt %>% 
+  select(-as.vector(t(uless))) %>% 
+  select(-c(1:6, ncol(.)))
+```
+
+## remove near zore variance which is also useless for model
+```{r}
+nzv <- nearZeroVar(new_train)
+new_train <- new_train[,-nzv]
+new_train$classe <- as.factor(new_train$classe)
+new_train <- new_train %>% 
+  mutate_if(is.integer, as.numeric)
+new_test <- new_test[,-nzv]
+```
+
+## data splitting using rsample from tidymodels
+```{r}
+set.seed(123)
+data_split <- initial_split(new_train, prop = 3/4)
+train_train <- training(data_split)
+train_test <- testing(data_split)
+```
+
+## preprocess data and create recipes
+```{r}
+rec <- 
+  recipe(classe ~ ., data = train_train)
+```
+
+## build the models using parsnip in tidymodels -- decision_tree first, then random foresst
+## dt--decision tree
+## rf--random forest
+```{r}
+mod_dt <- decision_tree() %>% 
+  set_engine('rpart') %>% 
+  set_mode('classification')
+```
+
+```{r}
+mod_rf <- rand_forest() %>% 
+  set_engine('ranger') %>% 
+  set_mode('classification')
+```
+
+## workflow
+```{r}
+wfow_dt <- 
+  workflow() %>% 
+  add_model(mod_dt) %>% 
+  add_recipe(rec)
+
+wfow_rf <- 
+  workflow() %>% 
+  add_model(mod_rf) %>% 
+  add_recipe(rec)
+```
+
+## fit resampled train data set
+```{r}
+fit_dt <- wfow_dt %>% 
+  fit(train_train)
+
+fit_rf <- wfow_rf %>% 
+  fit(train_train)
+```
+
+## predict
+```{r}
+aug_dt <- augment(fit_dt, train_test)
+aug_rf <- augment(fit_rf, train_test)
+```
+
+## generate the area under the ROC curve to estimate accuracy
+```{r}
+aug_dt %>% 
+  roc_auc(classe, .pred_A:.pred_E)
+
+aug_rf %>% 
+  roc_auc(classe, .pred_A:.pred_E)
+
+```
+
+## As we can see that random forest possess higher accuracy
+## (However, such high accuracy could attribute to non-resampled train data)
+## Finally, I decide to use random forest (fit_rf) to predict test data with 20 obs
+```{r}
+predict(fit_rf, test_dt)
+```
+
+
